@@ -1,0 +1,132 @@
+#!/bin/bash
+#
+# This is a migration tool to download your own repositories from a Gogs 
+# instance to your local machine.
+#
+# Maintainer: Nick Pleatsikas <nick@pleatsikas.me>
+
+download_all () {
+  # Function variables.
+  local url="$1"
+  local token="$2"
+  local regex="$3"
+  
+  local repo_urls=()
+
+  # Get list of repo URLS from API.
+  while IFS= read -r line; do
+    repo_urls+=("$line")
+  done <<< "$(curl -fsSL \
+    -H "Authorization: token ${token}" \
+    "https://${url}/api/v1/user/repos" \
+    | jq --arg regex "$regex" \
+    '.[] | select(.name|match($regex)).ssh_url'
+  )"
+
+  for url in "${repo_urls[@]}"; do
+    if ! git clone "${url//\"}"; then
+      >&2 echo "Could not clone ${url}"
+    fi
+
+    pushd "$PWD" > /dev/null 2>&1 || return
+    cd "$(basename "$url" ".git\"")" || return
+
+    # Download copies of all branches.
+    git branch -r | grep -v '\->' | while read -r remote; do
+      git branch --track "${remote#origin/}" "$remote"
+    done
+    git fetch --all
+    git pull --all
+
+    popd > /dev/null 2>&1 || return
+
+    printf "\n"
+  done
+}
+
+get_cli_value () {
+  IFS="=" read -ra values <<< "$1"
+  if [[ "${#values[@]}" -lt 2 ]]; then
+    >&2 echo "No value for arg:${values[0]} provided."
+    kill -9 $$
+  fi
+
+  echo "${values[1]}"
+}
+
+usage () {
+  cat << EOF
+Usage: download_repos FOLDER --url=URL --token=TOKEN --match=NAME_REGEX [--help | -h]
+  Downloads repositories from Gogs into FOLDER matching NAME_REGEX.
+  
+  Options:
+      --url=URL           Base URL of the Gogs instance.
+      --token=TOKEN       Your personal access token for Gogs.
+      --match=NAME_REGEX   Regex to match repository names.
+  -h  --help              Show this window.
+EOF
+}
+
+main () {
+  # Variables
+  local token
+  local url
+  local regex
+  local output
+
+  if [[ $# -lt 1 ]]; then
+    usage
+    exit
+  elif [[ $1 == "--"* ]]; then
+    >&2 echo "No output directory provided"
+    exit 1
+  fi
+
+  # Get output directory.
+  IFS="/" read -ra DIR_PATH <<< "$1"
+  if [[ $1 = "${DIR_PATH[0]}"* ]] && [[ -n "${DIR_PATH[0]}" ]]; then
+    output="$(pwd)/$1"
+  else
+    output="$1"
+  fi
+
+  shift
+
+  # Parse command line args.
+  while [[ $# -ne 0 ]]; do
+    case "$1" in
+      --token=*)
+        token="$(get_cli_value "$1")"
+        ;;
+      --url=*)
+        url="$(get_cli_value "$1")"
+        ;;
+      --match=*)
+        regex="$(get_cli_value "$1")"
+        ;;
+      --help | -h)
+        usage
+        exit
+        ;;
+      *)
+        echo "Unknown argument $1"
+        exit 1
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -z "$token" || -z "$url" || -z "$regex" ]]; then
+    >&2 echo "Some arguments not provided"
+    exit 1
+  fi
+
+  pushd "$PWD" > /dev/null 2>&1 || return
+  cd "$output" || return
+
+  download_all "$url" "$token" "$regex"
+
+  popd > /dev/null 2>&1 || return
+}
+
+main "$@" 
