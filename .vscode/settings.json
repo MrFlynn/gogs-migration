@@ -1,0 +1,4 @@
+{
+    "python.pythonPath": "~/.pyenv/versions/gogs-migration/bin/python",
+    "python.formatting.provider": "black",    
+}
