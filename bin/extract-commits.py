@@ -7,12 +7,16 @@ import pydriller
 
 
 def get_commits_from_path(path: pathlib.Path) -> pd.DataFrame:
-    commit_data = {"repo": [], "sha": [], "time": []}
+    commit_data = {"repo": [], "sha": [], "username": [], "email": [], "time": []}
     repo_name = path.absolute().name
 
     for commit in pydriller.RepositoryMining(str(path.absolute())).traverse_commits():
+        author = commit.author
+
         commit_data["repo"].append(repo_name)
         commit_data["sha"].append(commit.hash)
+        commit_data["username"].append(author.name)
+        commit_data["email"].append(author.email)
         commit_data["time"].append(commit.committer_date)
 
     return pd.DataFrame(commit_data)
@@ -35,7 +39,7 @@ def main():
         "--output",
         required=False,
         type=pathlib.Path,
-        default=pathlib.Path("./commits.csv")
+        default=pathlib.Path("./commits.csv"),
         help="CSV file to save commit data to.",
     )
 
