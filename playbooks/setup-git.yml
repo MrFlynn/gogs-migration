@@ -1,0 +1,39 @@
+---
+- hosts: synology
+  become: yes
+  become_method: sudo
+  become_user: root
+  vars:
+    password_generator: "{{ lookup('password', '/dev/null length=16') }}"
+    public_key: "{{ ssh_key | default('id_rsa.pub') }}"
+  tasks:
+  - name: Create password for git user
+    set_fact:
+      git_password: "{{ password_generator }}"
+  - debug:
+      msg: "Git user password: {{ git_password }}"
+  - name: Create git user
+    shell: |
+      /usr/syno/sbin/synouser --add git {{ git_password }} "Git" 0 "" 0
+  - name: Create .ssh folder for git
+    file:
+      path: /volume1/homes/git/.ssh
+      state: directory
+      owner: git
+      group: users
+      mode: 0700
+  - name: Create git share
+    shell: |
+      /usr/syno/sbin/synoshare --add git "Git storage volume" /volume1/git "" "" "" 0 0
+      /usr/syno/sbin/synoshare --setuser git RW + git
+  - name: Add authorized key for ssh
+    authorized_key:
+      user: git
+      key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/' + lookup('vars', 'public_key')) }}"
+  - name: Create git repositories
+    shell: |
+      git init --bare --shared {{ item }}.git
+      chown -R git:users {{ item }}.git
+    args:
+      chdir: /volume1/git
+    loop: "{{ lookup('file', '{{ hostvars[\"localhost\"][\"playbook_dir\"] }}/repositories.txt').splitlines() }}"
